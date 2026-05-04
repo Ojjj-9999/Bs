@@ -2,100 +2,76 @@
 --!nolint BuiltinGlobalWrite
 --!nolint UnknownGlobal
 
--- [[ 1. CONFIG & LPH SYSTEM ]] --
 repeat task.wait() until game:IsLoaded()
 
--- ตั้งค่าลิงก์ Raw โดยตรงจาก GitHub ของคุณ (ตรวจสอบแล้วว่าต้องมี refs/heads/main)
-local URL_Bypass = "https://raw.githubusercontent.com/Ojjj-9999/Bs/refs/heads/main/bypasses.luau"
-local URL_SecureRequest = "https://raw.githubusercontent.com/Ojjj-9999/Bs/refs/heads/main/secure_request.luau"
-
--- ระบบ LPH Compatibility (ใช้ชุดละเอียดที่คุณต้องการ)
+-- [[ 1. LPH SYSTEM ]] --
 if not LPH_OBFUSCATED then
-    getgenv().LPH_ENCNUM = function(toEncrypt, ...)
-        assert(type(toEncrypt) == "number" and #{ ... } == 0, "LPH_ENCNUM only accepts a single constant double or integer.")
-        return toEncrypt
-    end
-    getgenv().LPH_NUMENC = LPH_ENCNUM
-
-    getgenv().LPH_ENCSTR = function(toEncrypt, ...)
-        assert(type(toEncrypt) == "string" and #{ ... } == 0, "LPH_ENCSTR only accepts a single constant string.")
-        return toEncrypt
-    end
-    getgenv().LPH_STRENC = LPH_ENCSTR
-
-    getgenv().LPH_ENCFUNC = function(toEncrypt, encKey, decKey, ...)
-        assert(type(toEncrypt) == "function" and type(encKey) == "string" and #{ ... } == 0, "LPH_ENCFUNC accepts constant function and strings.")
-        return toEncrypt
-    end
-    getgenv().LPH_FUNCENC = LPH_ENCFUNC
-
-    getgenv().LPH_JIT = function(f, ...) return f end
-    getgenv().LPH_JIT_MAX = getgenv().LPH_JIT
-    getgenv().LPH_NO_VIRTUALIZE = function(f, ...) return f end
-    getgenv().LPH_NO_UPVALUES = function(f, ...) return f end
+    local id = function(v) return v end
+    getgenv().LPH_ENCNUM = id; getgenv().LPH_NUMENC = id
+    getgenv().LPH_ENCSTR = id; getgenv().LPH_STRENC = id
+    getgenv().LPH_ENCFUNC = id; getgenv().LPH_FUNCENC = id
+    getgenv().LPH_JIT = id; getgenv().LPH_JIT_MAX = id
+    getgenv().LPH_NO_VIRTUALIZE = id; getgenv().LPH_NO_UPVALUES = id
     getgenv().LPH_CRASH = function() warn("LPH_CRASH INVOKED") end
-    
     getgenv().Key = "KG-9964dacb-1a4b-42c5-b4a5-7308b8fc2150"
 end
 
--- [[ 2. ระบบโหลดโมดูลจาก GitHub ]] --
-local function LoadGit(url, name)
-    local success, content = pcall(function() return game:HttpGet(url) end)
-    if success then
-        local func, err = loadstring(content)
-        if func then
-            print("Successfully loaded: " .. name)
-            return func()
-        else
-            warn("Syntax Error in " .. name .. ": " .. tostring(err))
+-- [[ 2. IMPROVED CLOUD LOADER (Fix Directory Path Error) ]] --
+local GithubBase = "https://raw.githubusercontent.com/Ojjj-9999/Bs/refs/heads/main/"
+local ModuleCache = {}
+local OldRequire = require
+
+getgenv().require = function(module)
+    if typeof(module) == "Instance" then return OldRequire(module) end
+    local path = tostring(module)
+    if ModuleCache[path] then return ModuleCache[path] end
+
+    -- ฟังก์ชันช่วยดึงโค้ดจาก URL
+    local function Fetch(fileName)
+        -- ลองหาทั้งใน Root และในโฟลเดอร์ modules/
+        local locations = {GithubBase .. fileName, GithubBase .. "modules/" .. fileName}
+        for _, url in ipairs(locations) do
+            local s, content = pcall(game.HttpGet, game, url)
+            if s and content and not content:find("404: Not Found") then
+                return content
+            end
         end
-    else
-        warn("Failed to download " .. name .. " from GitHub.")
+        return nil
     end
-    -- คืนค่า Stub ป้องกันสคริปต์แครช
-    return setmetatable({}, {__index = function() return function() end end})
+
+    if path:match("%.luau?$") or path:find("modules") or path:find("/") then
+        local fileName = path:match("([^/]+)$") or path
+        if not fileName:match("%.luau?$") then fileName = fileName .. ".luau" end
+        
+        local content = Fetch(fileName)
+        if content then
+            local func, err = loadstring(content)
+            if func then
+                local result = func()
+                ModuleCache[path] = result
+                print("☁️ Loaded: " .. fileName)
+                return result
+            else
+                warn("❌ Syntax Error [" .. fileName .. "]: " .. tostring(err))
+            end
+        else
+            warn("⚠️ Not Found on GitHub: " .. fileName)
+            return setmetatable({}, {__index = function() return function() end end})
+        end
+    end
+    return OldRequire(module)
 end
 
--- โหลด Bypass และ SecureRequest
-LoadGit(URL_Bypass, "Bypasses")
-local SecureRequest = LoadGit(URL_SecureRequest, "SecureRequest")
+-- [[ 3. INITIALIZE CRITICAL MODULES ]] --
+-- โหลด Bypass ก่อนเพื่อน
+pcall(function() require("bypasses.luau") end)
+-- โหลด SecureRequest และเก็บไว้ใน Global
+getgenv().SecureRequest = require("secure_request.luau")
 
--- [[ 3. ตั้งค่าสภาพแวดล้อมสคริปต์ ]] --
-local hookfunction = shared.SafeHook
-local type, typeof, pairs, ipairs, table, next, string, math = type, typeof, pairs, ipairs, table, next, string, math
-local task, task_wait, task_spawn = task, task.wait, task.spawn
-
-local Storage = {
-    Originals = {},
-    OldHipHeight = 0,
-    RayCastGuides = {},
-    Panic = false,
-    MoveDirection = Vector3.zero,
-    ItemAuraConnections = {},
-    MovementSpoof = false,
-    SupressNotifications = false,
-    Connections = {},
-    Routines = {},
-}
-getgenv().BS_Storage = Storage
-
--- [[ 4. ฟังก์ชันหลัก (RunMain) ]] --
-local function RunMain()
-    print("Script Initializing...")
-    
-    -- โหลด UI Library
-    local LibraryUrl = "https://raw.githubusercontent.com/deividcomsono/Obsidian/738b589406cec1e47161e81243b5ff265c099048/Library.lua"
-    local success_ui, Library = pcall(function() return loadstring(game:HttpGet(LibraryUrl))() end)
-    
-    if success_ui then
-        getgenv().Library = Library
-        print("UI Library Loaded!")
-    end
-
-    -------------------------------------------------------
-    -- [ นำโค้ดดั้งเดิมจาก main.luau มาวางต่อที่นี่ ] --
-    -------------------------------------------------------
-    
+----------------------------------------------------------------------
+-- [[ 4. MAIN CONTENT (โค้ด 2,500 บรรทัดของคุณเริ่มต่อตรงนี้) ]] --
+----------------------------------------------------------------------
+  
     print("Main logic is running!")
 end
 
